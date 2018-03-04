@@ -11,8 +11,9 @@ import os
 
 BINDINGS = {
     'a': 0,
+    's': 1,
     'd': 2}
-SHARD_SIZE = 2000
+SHARD_SIZE = 1000
 
 def get_options():
     parser = argparse.ArgumentParser(description='Records an expert..')
@@ -81,6 +82,7 @@ def run_recorder(opts):
             sarsa = (_last_obs, action)
             _last_obs = obs
             sarsa_pairs.append(sarsa)
+            print(len(sarsa_pairs))
 
         if esc:
             break
@@ -90,6 +92,7 @@ def run_recorder(opts):
     print("SAVING")
     # Save out recording data.
     num_shards = int(np.ceil(len(sarsa_pairs)/SHARD_SIZE))
+    print(num_shards)
     for shard_iter in range(num_shards):
         shard = sarsa_pairs[
             shard_iter*SHARD_SIZE: min(
@@ -97,6 +100,7 @@ def run_recorder(opts):
 
         shard_name = "{}_{}.npy".format(str(shard_iter), shard_suffix)
         with open(os.path.join(ddir, shard_name), 'wb') as f:
+            print('save called')
             np.save(f, sarsa_pairs)
 
 if __name__ == "__main__":

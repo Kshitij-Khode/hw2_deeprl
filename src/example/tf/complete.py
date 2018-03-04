@@ -1,4 +1,4 @@
-import tensorflow as tf 
+import tensorflow as tf
 import numpy as np
 import argparse
 import os
@@ -25,7 +25,7 @@ def process_data(bc_data_dir):
     """
     Runs training for the agent.
     """
-    # Load the file store. 
+    # Load the file store.
     # In the future (TODO) move this to a seperate thread.
     states, actions = [], []
     shards = [x for x in os.listdir(bc_data_dir) if x.endswith('.npy')]
@@ -36,7 +36,7 @@ def process_data(bc_data_dir):
             data = np.load(f)
             shard_states, unprocessed_actions = zip(*data)
             shard_states = [x.flatten() for x in shard_states]
-            
+
             # Add the shard to the dataset
             states.extend(shard_states)
             actions.extend(unprocessed_actions)
@@ -61,7 +61,7 @@ def create_model():
         hidden = tf.layers.dense(hidden, 128, activation=tf.nn.relu)
     # Make output layers
     with tf.variable_scope("layer3"):
-        logits = tf.layers.dense(hidden, 2) 
+        logits = tf.layers.dense(hidden, 2)
     # Take the action with the highest activation
     with tf.variable_scope("output"):
         action = tf.argmax(input=logits, axis=1)
@@ -132,7 +132,7 @@ def run_main(opts):
             # Handle the toggling of different application states
             action = sess.run(model, feed_dict={
                 x: [obs.flatten()]
-            })[0]*2 
+            })[0]*2
 
 
             obs, reward, done, info = env.step(action)

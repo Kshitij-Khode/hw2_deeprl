@@ -1,5 +1,20 @@
 #!/usr/bin/env python
-import keras, tensorflow as tf, numpy as npy, gym, sys, copy, argparse
+import keras, tensorflow as tf, numpy as np, gym, sys, copy, argparse, os
+
+def process_data(bc_data_dir):
+    states, actions = [], []
+    shards = [x for x in os.listdir(bc_data_dir) if x.endswith('.npy')]
+    for shard in shards:
+        shard_path = os.path.join(bc_data_dir, shard)
+        with open(shard_path, 'rb') as f:
+            data = np.load(f)
+            shard_states, unprocessed_actions = zip(*data)
+            shard_states = [x.flatten() for x in shard_states]
+            states.extend(shard_states)
+            actions.extend(unprocessed_actions)
+    states = np.asarray(states, dtype=np.float32)
+    actions = np.asarray(actions, dtype=np.float32)/2
+    return states, actions
 
 class QNetwork():
 
@@ -7,22 +22,44 @@ class QNetwork():
     # The network should take in state of the world as an input,
     # and output Q values of the actions available to the agent as the output.
 
-    def __init__(self, environment_name):
+    def __init__(self, env_name):
         # Define your network architecture here. It is also a good idea to define any training operations
         # and optimizers here, initialize your variables, or alternately compile your model here.
-        inputs  = 2
-        outputs = 3
-        bias    = True
-        rho     = 0.9
-        epsilon = 1e-06
-        l_rate  = 0.01
 
-        self.model = Sequential()
-        self.model.add(Dense(outputs, input_shape=(inputs,), init='lecun_uniform', bias=bias))
-        self.model.add(Activation("linear"))
-        optimizer = optimizers.RMSprop(lr=l_rate, rho=rho, epsilon=epsilon)
-        self.model.compile(loss="mse", optimizer=optimizer)
-        self.model.summary()
+        self.env   = gym.make(env_name)
+
+        # [KBK:KBK:?] Only for now use TAs action-1 hack
+        self.nact = self.env.action_space.n-1
+
+        self.input, self.model, self.logits = self.create_model()
+        self.train, self.loss, self.labels = self.create_optimizer(self.logits)
+        self.opt_cnt = 0
+        self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
+        keras.backend.tensorflow_backend.set_session(self.sess)
+        self.m_summ = tf.summary.merge_all()
+        self.w_summ = tf.summary.FileWriter('./logs', self.sess.graph)
+        self.sess.run(tf.global_variables_initializer())
+
+    def create_model(self):
+        state_ph = tf.placeholder(tf.float32, shape=[None, self.nact])
+        with tf.variable_scope("layer1"): logits = tf.layers.dense(state_ph, self.nact)
+        with tf.variable_scope("output"): action = tf.argmax(input=logits, axis=1)
+
+        return state_ph, action, logits
+
+    def create_optimizer(self, logits):
+        label_ph = tf.placeholder(tf.int32, shape=[None])
+        with tf.variable_scope("loss"):
+            onehot_labels = tf.one_hot(indices=tf.cast(label_ph, tf.int32), depth=self.nact)
+            loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=logits)
+            loss = tf.reduce_mean(loss)
+            tf.summary.scalar('loss', loss)
+
+        with tf.variable_scope("training"):
+            optimizer = tf.train.AdamOptimizer(learning_rate=1e-3)
+            train_op = optimizer.minimize(loss=loss)
+
+        return train_op, loss, label_ph
 
     def save_model_weights(self, suffix):
         # Helper function to save your model / weights.
@@ -36,9 +73,17 @@ class QNetwork():
         # Helper funciton to load model weights.
         pass
 
-    def get_Qs():
-        predicted = self.model.predict(state.reshape(1,len(state)))
-        return predicted[0]
+    def get_actions(self, state):
+        return self.sess.run(self.model, feed_dict={self.input: [state.flatten()]})[0]*2
+
+    def update_net(self, states, actions, verb=True):
+        self.opt_cnt += 1
+        _, loss, summ = self.sess.run([self.train, self.loss, self.m_summ], feed_dict={
+            self.input: states,
+            self.labels: actions
+        })
+        if verb: print("Loss: {}".format(loss))
+        self.w_summ.add_summary(summ, self.opt_cnt)
 
 
 class Replay_Memory():
@@ -51,6 +96,7 @@ class Replay_Memory():
         # Burn in episodes define the number of episodes that are written into the memory from the
         # randomly initialized agent. Memory size is the maximum size after which old elements in the memory are replaced.
         # A simple (if not the most efficient) was to implement the memory is as a list of transitions.
+
         self.memory_size = memory_size
         self.burn_in = burn_in
         self.memory = [None for i in xrange(memory_size)]
@@ -87,20 +133,27 @@ class DQN_Agent():
     # (4) Create a function to test the Q Network's performance on the environment.
     # (5) Create a function for Experience Replay.
 
-    def __init__(self, environment_name, render=False):
+    def __init__(self, env_name, render=False):
 
         # Create an instance of the network itself, as well as the memory.
         # Here is also a good place to set environmental parameters,
         # as well as training parameters - number of episodes / iterations, etc.
-        this.env = gym.make('MountainCar-v0')
+
+        self.max_epochs = 1000
+        self.max_episode_len = 100000
+        self.c_eps = 0.3
+        self.q_net = QNetwork(env_name)
+        self.render = render
 
     def epsilon_greedy_policy(self, q_values):
         # Creating epsilon greedy probabilities to sample from.
-        pass
+        if np.random.uniform() < self.c_eps: return np.random.random_integers(0, self.nact-1)
+        else: return greedy_policy(q_values)
+
 
     def greedy_policy(self, q_values):
         # Creating greedy policy for test time.
-        pass
+        return np.argmax(q_values)
 
     def train(self):
         # In this function, we will train our network.
@@ -109,7 +162,21 @@ class DQN_Agent():
 
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
-        pass
+
+        state_data, action_data = process_data('./example/tf/data/')
+
+        for ep in xrange(self.max_epochs):
+            nstate = self.q_net.env.reset()
+
+            for step in xrange(self.max_episode_len):
+                if self.render: self.q_net.env.render()
+
+                batch_index = np.random.choice(len(state_data), 64)
+                state_batch, action_batch = state_data[batch_index], action_data[batch_index]
+
+                self.q_net.update_net(state_batch, action_batch)
+                action = self.q_net.get_actions(nstate)
+                nstate, reward, done, info = self.q_net.env.step(action)
 
 
     def test(self, model_file=None):
@@ -132,18 +199,11 @@ def parse_arguments():
 def main(args):
 
     args = parse_arguments()
-    environment_name = args.env
-
-    # Setting the session to allow growth, so it doesn't allocate all GPU memory.
-    gpu_ops = tf.GPUOptions(allow_growth=True)
-    config = tf.ConfigProto(gpu_options=gpu_ops)
-    sess = tf.Session(config=config)
-
-    # Setting this as the default tensorflow session.
-    keras.backend.tensorflow_backend.set_session(sess)
+    env_name = args.env
 
     # You want to create an instance of the DQN_Agent class here, and then train / test it.
-
+    dqn_agent = DQN_Agent('MountainCar-v0', render=True)
+    dqn_agent.train()
 
 if __name__ == '__main__':
     main(sys.argv)
