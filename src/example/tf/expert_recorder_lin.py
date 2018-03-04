@@ -11,8 +11,8 @@ import os
 
 BINDINGS = {
     'a': 0,
-    's': 1,
     'd': 2}
+
 SHARD_SIZE = 1000
 
 def get_options():

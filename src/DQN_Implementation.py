@@ -1,21 +1,6 @@
 #!/usr/bin/env python
 import keras, tensorflow as tf, numpy as np, gym, sys, copy, argparse, os
 
-def process_data(bc_data_dir):
-    states, actions = [], []
-    shards = [x for x in os.listdir(bc_data_dir) if x.endswith('.npy')]
-    for shard in shards:
-        shard_path = os.path.join(bc_data_dir, shard)
-        with open(shard_path, 'rb') as f:
-            data = np.load(f)
-            shard_states, unprocessed_actions = zip(*data)
-            shard_states = [x.flatten() for x in shard_states]
-            states.extend(shard_states)
-            actions.extend(unprocessed_actions)
-    states = np.asarray(states, dtype=np.float32)
-    actions = np.asarray(actions, dtype=np.float32)/2
-    return states, actions
-
 class QNetwork():
 
     # This class essentially defines the network architecture.
@@ -26,13 +11,11 @@ class QNetwork():
         # Define your network architecture here. It is also a good idea to define any training operations
         # and optimizers here, initialize your variables, or alternately compile your model here.
 
-        self.env   = gym.make(env_name)
-
-        # [KBK:KBK:?] Only for now use TAs action-1 hack
-        self.nact = self.env.action_space.n-1
-
-        self.input, self.model, self.logits = self.create_model()
-        self.train, self.loss, self.labels = self.create_optimizer(self.logits)
+        self.env = gym.make(env_name)
+        self.dstate = len(self.env.reset())
+        self.nact = self.env.action_space.n
+        self.input, self.model, self.output = self.create_model()
+        self.train, self.loss, self.labels = self.create_optimizer(self.output)
         self.opt_cnt = 0
         self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
         keras.backend.tensorflow_backend.set_session(self.sess)
@@ -41,18 +24,16 @@ class QNetwork():
         self.sess.run(tf.global_variables_initializer())
 
     def create_model(self):
-        state_ph = tf.placeholder(tf.float32, shape=[None, self.nact])
-        with tf.variable_scope("layer1"): logits = tf.layers.dense(state_ph, self.nact)
-        with tf.variable_scope("output"): action = tf.argmax(input=logits, axis=1)
+        state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
+        with tf.variable_scope("layer1"): layer1 = tf.layers.dense(state_ph, self.nact)
+        with tf.variable_scope("output"): action = tf.argmax(input=layer1, axis=1)
 
-        return state_ph, action, logits
+        return state_ph, action, layer1
 
-    def create_optimizer(self, logits):
+    def create_optimizer(self, output):
         label_ph = tf.placeholder(tf.int32, shape=[None])
         with tf.variable_scope("loss"):
-            onehot_labels = tf.one_hot(indices=tf.cast(label_ph, tf.int32), depth=self.nact)
-            loss = tf.losses.softmax_cross_entropy(onehot_labels=onehot_labels, logits=logits)
-            loss = tf.reduce_mean(loss)
+            loss = tf.reduce_mean(tf.nn.l2_loss(output))
             tf.summary.scalar('loss', loss)
 
         with tf.variable_scope("training"):
@@ -73,22 +54,22 @@ class QNetwork():
         # Helper funciton to load model weights.
         pass
 
-    def get_actions(self, state):
-        return self.sess.run(self.model, feed_dict={self.input: [state.flatten()]})[0]*2
+    def get_qvals(self, state):
+        return self.sess.run(self.model, feed_dict={self.input: [state.flatten()]})[0]
 
-    def update_net(self, states, actions, verb=True):
-        self.opt_cnt += 1
+    def update_net(self, states, q_lbls, verb=True):
         _, loss, summ = self.sess.run([self.train, self.loss, self.m_summ], feed_dict={
             self.input: states,
-            self.labels: actions
+            self.labels: q_lbls
         })
         if verb: print("Loss: {}".format(loss))
+        self.opt_cnt += 1
         self.w_summ.add_summary(summ, self.opt_cnt)
 
 
 class Replay_Memory():
 
-    def __init__(self, memory_size=50000, burn_in=10000):
+    def __init__(self, memory_size=50000, burn_in=10000, batch_size=32):
 
         # The memory essentially stores transitions recorder from the agent
         # taking actions in the environment.
@@ -102,9 +83,10 @@ class Replay_Memory():
         self.memory = [None for i in xrange(memory_size)]
         self.next = 0
         self.size = 0
+        self.batch_size = batch_size
 
 
-    def sample_batch(self, batch_size=32):
+    def sample_batch(self):
         # This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples.
         # You will feed this to your model to train.
         indices = np.random.choice(self.size, self.batch_size)
@@ -142,14 +124,18 @@ class DQN_Agent():
         self.max_epochs = 1000
         self.max_episode_len = 100000
         self.c_eps = 0.3
+        self.gamma = 0.9
         self.q_net = QNetwork(env_name)
+        self.rep_mem = Replay_Memory()
         self.render = render
 
     def epsilon_greedy_policy(self, q_values):
         # Creating epsilon greedy probabilities to sample from.
-        if np.random.uniform() < self.c_eps: return np.random.random_integers(0, self.nact-1)
-        else: return greedy_policy(q_values)
+        if np.random.uniform() < self.c_eps: return np.random.random_integers(0, self.q_net.nact-1)
+        else: return self.greedy_policy(q_values)
 
+    def random_policy(self):
+        return np.random.random_integers(0, self.q_net.nact-1)
 
     def greedy_policy(self, q_values):
         # Creating greedy policy for test time.
@@ -163,7 +149,7 @@ class DQN_Agent():
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
 
-        state_data, action_data = process_data('./example/tf/data/')
+        self.burn_in_memory()
 
         for ep in xrange(self.max_epochs):
             nstate = self.q_net.env.reset()
@@ -171,12 +157,16 @@ class DQN_Agent():
             for step in xrange(self.max_episode_len):
                 if self.render: self.q_net.env.render()
 
-                batch_index = np.random.choice(len(state_data), 64)
-                state_batch, action_batch = state_data[batch_index], action_data[batch_index]
+                nstate, reward, term, info = self.q_net.env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate)))
+                self.rep_mem.append((nstate, reward, term, info))
 
-                self.q_net.update_net(state_batch, action_batch)
-                action = self.q_net.get_actions(nstate)
-                nstate, reward, done, info = self.q_net.env.step(action)
+                state_batch = []
+                q_batch = []
+                for state, reward, term, info in self.rep_mem.sample_batch():
+                    state_batch.append(state)
+                    q_batch.append(reward if term else reward+np.max(self.q_net.get_qvals(nstate)))
+
+                self.q_net.update_net(state_batch, q_batch)
 
 
     def test(self, model_file=None):
@@ -184,9 +174,33 @@ class DQN_Agent():
         # Here you need to interact with the environment, irrespective of whether you are using a memory.
         pass
 
-    def burn_in_memory():
+    def burn_in_memory(self, verb=True):
         # Initialize your replay memory with a burn_in number of episodes / transitions.
-        pass
+        if verb: print('[LOG] starting burn_in_memory')
+        self.q_net.env.reset()
+        for _ in xrange(self.rep_mem.burn_in):
+            for _ in xrange(self.max_episode_len):
+                nstate, reward, term, info = self.q_net.env.step(self.random_policy())
+                self.rep_mem.append((nstate, reward, term, info))
+                if term: break
+        if verb: print('[LOG] burn_in_memory ended')
+
+    def burn_in_expert_memory(self, bc_data_dir):
+        states, actions = [], []
+        shards = [x for x in os.listdir(bc_data_dir) if x.endswith('.npy')]
+        for shard in shards:
+            shard_path = os.path.join(bc_data_dir, shard)
+            with open(shard_path, 'rb') as f:
+                data = np.load(f, encoding='bytes')
+                shard_states, unprocessed_actions = zip(*data)
+                shard_states = [x.flatten() for x in shard_states]
+                states.extend(shard_states)
+                actions.extend(unprocessed_actions)
+        states = np.asarray(states, dtype=np.float32)
+        actions = np.asarray(actions, dtype=np.float32)/2
+        return states, actions
+
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Deep Q Network Argument Parser')
