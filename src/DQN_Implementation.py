@@ -52,20 +52,29 @@ class Replay_Memory():
         # randomly initialized agent. Memory size is the maximum size after which old elements in the memory are replaced.
         # A simple (if not the most efficient) was to implement the memory is as a list of transitions.
         self.memory_size = memory_size
-        self.burn_in     = burn_in
-        self.memory      = []
-        self.mem_ind     = 0
-        self.episode_cnt = 0
+        self.burn_in = burn_in
+        self.memory = [None for i in xrange(memory_size)]
+        self.next = 0
+        self.size = 0
+
 
     def sample_batch(self, batch_size=32):
         # This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples.
         # You will feed this to your model to train.
-        pass
+        indices = np.random.choice(self.size, self.batch_size)
+        result = []
+        for ind in indices:
+            result += [self.memory[ind]]
+        return result
 
     def append(self, transition):
         # Appends transition to the memory.
-        if episode_cnt <= burn_in
-        self.memory.append(transition)
+        self.memory[self.next] = transition
+        self.next += 1
+        if self.size <= self.memory:
+            self.size += 1
+        if self.next >= self.memory:
+            self.next = 0
 
 class DQN_Agent():
 
@@ -100,8 +109,8 @@ class DQN_Agent():
 
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
+        pass
 
-        for
 
     def test(self, model_file=None):
         # Evaluate the performance of your agent over 100 episodes, by calculating cummulative rewards for the 100 episodes.
@@ -110,7 +119,7 @@ class DQN_Agent():
 
     def burn_in_memory():
         # Initialize your replay memory with a burn_in number of episodes / transitions.
-
+        pass
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Deep Q Network Argument Parser')
