@@ -26,9 +26,8 @@ class QNetwork():
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
         with tf.variable_scope("layer1"): layer1 = tf.layers.dense(state_ph, self.nact)
-        with tf.variable_scope("output"): action = tf.argmax(input=layer1, axis=1)
 
-        return state_ph, action, layer1
+        return state_ph, layer1, layer1
 
     def create_optimizer(self, output):
         label_ph = tf.placeholder(tf.int32, shape=[None])
@@ -122,7 +121,7 @@ class DQN_Agent():
         # as well as training parameters - number of episodes / iterations, etc.
 
         self.max_epochs = 1000
-        self.max_episode_len = 100000
+        self.max_episode_len = 1000
         self.c_eps = 0.3
         self.gamma = 0.9
         self.q_net = QNetwork(env_name)
@@ -150,10 +149,9 @@ class DQN_Agent():
         # transitions to memory, while also updating your model.
 
         self.burn_in_memory()
+        nstate = self.q_net.env.reset()
 
         for ep in xrange(self.max_epochs):
-            nstate = self.q_net.env.reset()
-
             for step in xrange(self.max_episode_len):
                 if self.render: self.q_net.env.render()
 
@@ -167,7 +165,8 @@ class DQN_Agent():
                     q_batch.append(reward if term else reward+np.max(self.q_net.get_qvals(nstate)))
 
                 self.q_net.update_net(state_batch, q_batch)
-
+            self.c_eps = max(0.05, self.c_eps*0.9)
+            print('[LOG] max_episode_len reached. new epsilon value:%s' % self.c_eps)
 
     def test(self, model_file=None):
         # Evaluate the performance of your agent over 100 episodes, by calculating cummulative rewards for the 100 episodes.
