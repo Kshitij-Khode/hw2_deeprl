@@ -11,11 +11,11 @@ class QNetwork():
         # Define your network architecture here. It is also a good idea to define any training operations
         # and optimizers here, initialize your variables, or alternately compile your model here.
 
-        self.goal_state = [0.5, 0.028]
-        self.env = gym.make(env_name)
-        self.dstate = len(self.env.reset())
-        self.nact = self.env.action_space.n
-
+        # self.goal_state = [0.5, 0.028]
+        env = gym.make(env_name)
+        self.dstate = len(env.reset())
+        self.nact = env.action_space.n
+        env.close()
         self.lrate = 1e-3;
         self.opt_cnt = 0
         self.input, self.model, self.output = self.create_model()
@@ -64,7 +64,7 @@ class QNetwork():
             self.input: states,
             self.labels: q_lbls
         })
-        if verb: print("Loss: {}".format(loss))
+        if verb > 0: print("Loss: {}".format(loss))
         self.opt_cnt += 1
         self.w_summ.add_summary(summ, self.opt_cnt)
 
@@ -125,6 +125,7 @@ class DQN_Agent():
         self.meps = 0.05
         self.q_net = QNetwork(env_name)
         self.rep_mem = Replay_Memory(burn_in=5000)
+        self.env_name = env_name
 
     def epsilon_greedy_policy(self, q_values, eps):
         # Creating epsilon greedy probabilities to sample from.
@@ -138,7 +139,7 @@ class DQN_Agent():
         # Creating greedy policy for test time.
         return np.argmax(q_values)
 
-    def train(self, render=False):
+    def train(self, render=False, verb=0):
         # In this function, we will train our network.
         # If training without experience replay_memory, then you will interact with the environment
         # in this function, while also updating your network parameters.
@@ -146,7 +147,8 @@ class DQN_Agent():
         # If you are using a replay memory, you should interact with environment here, and store these
         # transitions to memory, while also updating your model.
 
-        print('[LOG] DQN_Agent::train::start')
+        if verb > 0: print('DQN_Agent::train::start')
+        self.burn_in_memory(verb=1)
 
         max_ep = 3000
         max_epi_len = 10000
@@ -154,17 +156,16 @@ class DQN_Agent():
         gamma = 1
         eps = 0.5
         nq_upd = 0
-
-        self.burn_in_memory(verb=1)
-        nstate = self.q_net.env.reset()
+        env = gym.make(self.env_name).env
 
         for _ in xrange(max_ep):
-            nstate = self.q_net.env.reset()
+            nstate = env.reset()
 
             for _ in xrange(max_epi_len):
-                if render: self.q_net.env.render()
+                if render: env.render()
 
-                nstate, reward, term, info = self.q_net.env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
+                nstate, reward, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
+                if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
                 self.rep_mem.append((nstate, reward, term, info))
 
                 state_batch, q_batch = [], []
@@ -175,71 +176,83 @@ class DQN_Agent():
                 loss = self.q_net.update_net(state_batch, q_batch)
                 nq_upd += 1
                 if nq_upd % eps_upd_int == 0: eps = max(self.meps, eps-self.deps)
-                if nstate[0] > self.q_net.goal_state[0] and nstate[1] < self.q_net.goal_state[1]:
-                    print('[LOG] DQN_Agent::train::term_state(%s)' % nstate)
+                if term:
+                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
                     break
 
-            print('[LOG] DQN_Agent::train::eps(%s),loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
+            if verb > 0: print('DQN_Agent::train::eps(%s),loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
 
-            self.test(render=True)
+            self.test(render=True, verb=1)
 
-        print('[LOG] DQN_Agent::train::return')
+        env.close()
+        if verb > 0: print('DQN_Agent::train::return')
 
 
-    def test(self, model_file=None, render=False):
+    def test(self, model_file=None, render=False, verb=0):
         # Evaluate the performance of your agent over (100?) episodes, by calculating cummulative rewards for the (100?) episodes.
         # Here you need to interact with the environment, irrespective of whether you are using a memory.
+
+        if verb > 0: print('DQN_Agent::test::start')
 
         max_ep = 20
         max_epi_len = 200
         eps = 0.5
         avg_rew = 0
+        env = gym.make(self.env_name).env
 
         for _ in xrange(max_ep):
-            nstate = self.q_net.env.reset()
+            nstate = env.reset()
 
             for _ in xrange(max_epi_len):
-                if render: self.q_net.env.render()
+                if render: env.render()
 
-                nstate, reward, term, info = self.q_net.env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), self.meps))
+                nstate, reward, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), self.meps))
+                if verb > 1: print('DQN_Agent::test::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
                 avg_rew += reward
-                if nstate[0] > self.q_net.goal_state[0] and nstate[1] < self.q_net.goal_state[1]:
-                    print('[LOG] DQN_Agent::test::term_state(%s)' % nstate)
+                if term:
+                    if verb > 0: print('DQN_Agent::test::term_state(%s)' % nstate)
                     break
 
         avg_rew /= max_ep
-        print('[LOG] DQN_Agent::test::avg_rew:%s' % avg_rew)
+        env.close()
+        if verb > 0: print('DQN_Agent::test::return::avg_rew:%s' % avg_rew)
+        return avg_rew
 
 
     def burn_in_memory(self, render=False, verb=0):
         # Initialize your replay memory with a burn_in number of episodes / transitions.
-        if verb > 0: print('[LOG] DQN_Agent::burn_in_memory::start')
+        if verb > 0: print('DQN_Agent::burn_in_memory::start')
+
+        env = gym.make(self.env_name).env
 
         for _ in xrange(self.rep_mem.burn_in):
-            if render: self.q_net.env.render()
+            if render: env.render()
 
-            nstate, reward, term, info = self.q_net.env.step(self.random_policy())
+            nstate, reward, term, info = env.step(self.random_policy())
+            if verb > 1: print('DQN_Agent::burn_in_memory::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
             self.rep_mem.append((nstate, reward, term, info))
-            if nstate[0] > self.q_net.goal_state[0] and nstate[1] < self.q_net.goal_state[1]:
-                self.q_net.env.reset()
-                print('[LOG] DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
+            if term:
+                env.reset()
+                if verb > 0: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
 
-        if verb > 0: print('[LOG] DQN_Agent::burn_in_memory::return')
+        env.close()
+        if verb > 0: print('DQN_Agent::burn_in_memory::return')
 
     def burn_in_expert(self, data_dir, verb=0):
-        if verb > 0: print('[LOG] DQN_Agent::burn_in_expert::start')
+        if verb > 0: print('DQN_Agent::burn_in_expert::start')
 
         transitions = []
         shards = [x for x in os.listdir(bc_data_dir) if x.endswith('.npy')]
-        print("Processing shards: {}".format(shards))
+        if verb > 0: print("Processing shards: {}".format(shards))
         for shard in shards:
             shard_path = os.path.join(bc_data_dir, shard)
             with open(shard_path, 'rb') as f:
                 data = np.load(f)
                 for d in data:
                     self.rep_mem.append(d)
+                    if verb > 1: print('DQN_Agent::burn_in_expert::ntrans::%s' % d)
 
-        if verb > 0: print('[LOG] DQN_Agent::burn_in_expert::return')
+        if verb > 0: print('DQN_Agent::burn_in_expert::return')
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Deep Q Network Argument Parser')
@@ -256,7 +269,7 @@ def main(args):
 
     # You want to create an instance of the DQN_Agent class here, and then train / test it.
     dqn_agent = DQN_Agent('MountainCar-v0')
-    dqn_agent.train()
+    dqn_agent.train(verb=1)
 
 if __name__ == '__main__':
     main(sys.argv)
