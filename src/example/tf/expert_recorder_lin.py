@@ -45,7 +45,7 @@ def run_recorder(opts):
 
 
     shard_suffix = ''.join(random.choice('0123456789ABCDEF') for i in range(16))
-    sarsa_pairs = []
+    trans_pairs = []
 
 
 
@@ -77,12 +77,13 @@ def run_recorder(opts):
                 break
 
             obs, reward, done, info = env.step(action)
+            print((obs, reward, done, info))
 
             no_action = False
-            sarsa = (_last_obs, action)
+            trans = (obs, reward, done, info)
             _last_obs = obs
-            sarsa_pairs.append(sarsa)
-            print(len(sarsa_pairs))
+            trans_pairs.append(trans)
+            print(len(trans_pairs))
 
         if esc:
             break
@@ -91,17 +92,17 @@ def run_recorder(opts):
 
     print("SAVING")
     # Save out recording data.
-    num_shards = int(np.ceil(len(sarsa_pairs)/SHARD_SIZE))
+    num_shards = int(np.ceil(len(trans_pairs)/SHARD_SIZE))
     print(num_shards)
     for shard_iter in range(num_shards):
-        shard = sarsa_pairs[
+        shard = trans_pairs[
             shard_iter*SHARD_SIZE: min(
-                (shard_iter+1)*SHARD_SIZE, len(sarsa_pairs))]
+                (shard_iter+1)*SHARD_SIZE, len(trans_pairs))]
 
         shard_name = "{}_{}.npy".format(str(shard_iter), shard_suffix)
         with open(os.path.join(ddir, shard_name), 'wb') as f:
             print('save called')
-            np.save(f, sarsa_pairs)
+            np.save(f, trans_pairs)
 
 if __name__ == "__main__":
     opts = get_options()
