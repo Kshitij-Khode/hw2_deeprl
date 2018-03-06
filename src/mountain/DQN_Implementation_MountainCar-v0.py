@@ -258,10 +258,10 @@ class DQN_Agent():
         if verb > 0: print('DQN_Agent::test::start')
 
         max_ep = 20
-        max_epi_len = 200
+        max_epi_len = 10000
         eps = 0.5
         avg_rew = 0
-        env = gym.make(self.env_name).env
+        env = gym.make(self.env_name)
 
         for _ in xrange(max_ep):
             nstate = env.reset()
