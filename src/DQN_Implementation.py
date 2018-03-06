@@ -18,7 +18,8 @@ class QNetwork():
         # and optimizers here, initialize your variables, or alternately compile your model here.
 
         # self.goal_state = [0.5, 0.028]
-        env = gym.make(env_name)
+        self.env_name = env_name
+        env = gym.make(self.env_name)
         self.dstate = len(env.reset())
         self.nact = env.action_space.n
         env.close()
@@ -32,6 +33,7 @@ class QNetwork():
         self.m_summ = tf.summary.merge_all()
         self.w_summ = tf.summary.FileWriter('./logs', self.sess.graph)
         self.sess.run(tf.global_variables_initializer())
+        self.saver = tf.train.Saver()
 
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
@@ -53,7 +55,7 @@ class QNetwork():
 
     def save_model_weights(self, suffix):
         # Helper function to save your model / weights.
-        pass
+        self.saver.save(self.sess, '%s%s%s%s' % ('./model/', self.env_name, suffix, '.ckpt'))
 
     def load_model(self, model_file):
         # Helper function to load an existing model.
@@ -155,49 +157,62 @@ class DQN_Agent():
         # transitions to memory, while also updating your model.
 
         if verb > 0: print('DQN_Agent::train::start')
-        self.burn_in_memory(verb=1)
+        self.burn_in_memory(render=False, verb=1)
 
         max_ep = 3000
         max_epi_len = 10000
+        rec_len = 200
+        rec_int = 5
+        test_rend_int = 5
+        test_rend = False
+        rec_stop = 0
+        record = False
+        save_int = 5
         eps_upd_int = 200
-        rec_int = 1000
         gamma = 1
         eps = 0.5
         nq_upd = 0
-        render_ep = render
         ars = []
         env = gym.make(self.env_name).env
-        env = gym.wrappers.Monitor(env, './recordings/').env
+        env = gym.wrappers.Monitor(env, './recordings/', force=True).env
 
         for ep in xrange(max_ep):
             nstate = env.reset()
-            if (ars and ars[-1] >= -120) or (ep % rec_int == 0): render_ep = True
-            else: render_ep = render
+            if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
+                record = True
+                record_stop = nq_upd+rec_len
+
+            if ep % test_rend_int == 0: test_rend = True
+            else: test_rend = False
 
             for _ in xrange(max_epi_len):
-                if render_ep: env.render()
+                if nq_upd == record_stop: record = False
+                if render or record: env.render()
 
                 nstate, rew, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
                 if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, rew, term, info))
-                if term:
-                    nstate = env.reset()
-                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
                 self.rep_mem.append((nstate, rew, term, info))
+                if term:
+                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
+                    nstate = env.reset()
 
                 state_batch, q_batch = [], []
                 for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
                     state_batch.append(lstate)
-                    q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(nstate)))
+                    q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lstate)))
 
                 loss = self.q_net.update_net(state_batch, q_batch)
                 nq_upd += 1
                 if nq_upd % eps_upd_int == 0:
                     eps = max(self.meps, eps-self.deps)
-                    if verb > 1: print('DQN_Agent::train::eps_upd(%s)' % eps)
+                    if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
-            if verb > 0: print('DQN_Agent::train::eps(%s),loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
+            if ep % save_int == 0:
+                self.q_net.save_model_weights(ep)
+                if verb > 0: print('DQN_Agent::train::save_model_weights(%s)' % ep)
+            if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
 
-            ars.append(self.test(verb=1))
+            ars.append(self.test(render=test_rend, verb=1))
             if ars[-1] <= -110:
                 ds = [ars[i+1]-ars[i] for i in xrange(len(ars)-1)]
                 if len(ds) > 0 and all(d != 0 and abs(d) < 30 for d in ds):
