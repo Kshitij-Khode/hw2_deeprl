@@ -285,6 +285,7 @@ class DQN_Agent():
         if verb > 0: print('DQN_Agent::burn_in_memory::start')
 
         env = gym.make(self.env_name).env
+        nstate = env.reset()
 
         for _ in xrange(self.rep_mem.burn_in):
             if render: env.render()

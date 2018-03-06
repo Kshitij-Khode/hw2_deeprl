@@ -24,7 +24,7 @@ class QNetwork():
         self.dstate = len(env.reset())
         self.nact = env.action_space.n
         env.close()
-        self.lrate = 1e-4
+        self.lrate = 1e-3
         self.dlrate = 1e-4
         self.opt_cnt = 0
         self.input, self.model, self.output = self.create_model()
@@ -160,26 +160,24 @@ class DQN_Agent():
         if verb > 0: print('DQN_Agent::train::start')
         self.burn_in_memory(render=False, verb=1)
 
-        max_ep = 3000
-        max_epi_len = 10000
+        max_ep = 10
+        max_epi_len = 100000
         rec_len = 200
 
-        # rec_int = 5
-        # test_rend_int = 5
-        rec_int = 1000
-        test_rend_int = 1000
+        rec_int = 1
+        test_rend_int = 1
 
         test_rend = False
         rec_stop = 0
         record = False
-        save_int = 5
+        save_int = 1
         eps_upd_int = 200
         gamma = 1
         eps = 0.5
         nq_upd = 0
         ars = []
-        env = gym.make(self.env_name).env
-        env = gym.wrappers.Monitor(env, './recordings/', force=True).env
+        env = gym.make(self.env_name)
+        # env = gym.wrappers.Monitor(env, './recordings/', force=True)
 
         for ep in xrange(max_ep):
             nstate = env.reset()
@@ -206,7 +204,7 @@ class DQN_Agent():
                 if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, rew, term, info))
                 self.rep_mem.append((nstate, rew, term, info))
                 if term:
-                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
+                    if verb > 1: print('DQN_Agent::train::term_state(%s)' % nstate)
                     nstate = env.reset()
 
                 state_batch, q_batch = [], []
@@ -226,7 +224,7 @@ class DQN_Agent():
             if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
 
             ars.append(self.test(render=test_rend, verb=1))
-            if ars[-1] <= -110:
+            if ars[-1] <= 200:
                 ds = [ars[i+1]-ars[i] for i in xrange(len(ars)-1)]
                 if len(ds) > 0 and all(d != 0 and abs(d) < 30 for d in ds):
                     self.q_net.lrate -= self.q_net.dlrate
@@ -258,7 +256,7 @@ class DQN_Agent():
         max_epi_len = 200
         eps = 0.5
         avg_rew = 0
-        env = gym.make(self.env_name).env
+        env = gym.make(self.env_name)
 
         for _ in xrange(max_ep):
             nstate = env.reset()
@@ -284,17 +282,17 @@ class DQN_Agent():
         # Initialize your replay memory with a burn_in number of episodes / transitions.
         if verb > 0: print('DQN_Agent::burn_in_memory::start')
 
-        env = gym.make(self.env_name).env
+        env = gym.make(self.env_name)
+        nstate = env.reset()
 
         for _ in xrange(self.rep_mem.burn_in):
             if render: env.render()
-
             nstate, reward, term, info = env.step(self.random_policy())
             if verb > 1: print('DQN_Agent::burn_in_memory::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
             self.rep_mem.append((nstate, reward, term, info))
             if term:
                 env.reset()
-                if verb > 0: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
+                if verb > 1: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
 
         if render: env.render(close=True)
         env.close()
@@ -330,7 +328,7 @@ def main(args):
     env_name = args.env
 
     # You want to create an instance of the DQN_Agent class here, and then train / test it.
-    dqn_agent = DQN_Agent('MountainCar-v0')
+    dqn_agent = DQN_Agent('CartPole-v0')
     dqn_agent.train(verb=1)
 
 if __name__ == '__main__':
