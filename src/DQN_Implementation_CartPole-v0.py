@@ -330,7 +330,7 @@ def main(args):
     env_name = args.env
 
     # You want to create an instance of the DQN_Agent class here, and then train / test it.
-    dqn_agent = DQN_Agent(env_name)
+    dqn_agent = DQN_Agent('MountainCar-v0')
     dqn_agent.train(verb=1)
 
 if __name__ == '__main__':
