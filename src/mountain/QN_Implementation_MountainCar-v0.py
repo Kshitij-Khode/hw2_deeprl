@@ -38,10 +38,9 @@ class QNetwork():
 
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
-        with tf.variable_scope("layer1"): hidden = tf.layers.dense(state_ph, 128, activation=tf.nn.relu)
-        with tf.variable_scope("layer2"): hidden = tf.layers.dense(hidden, 128, activation=tf.nn.relu)
-        with tf.variable_scope("layer3"): output = tf.layers.dense(hidden, self.nact)
-        return state_ph, output, output
+        with tf.variable_scope("layer1"): layer1 = tf.layers.dense(state_ph, self.nact)
+
+        return state_ph, layer1, layer1
 
     def create_optimizer(self, output):
         label_ph = tf.placeholder(tf.float32, shape=[None])
@@ -161,36 +160,38 @@ class DQN_Agent():
         if verb > 0: print('DQN_Agent::train::start')
         self.burn_in_memory(render=False, verb=1)
 
-        max_ep = 10
-        max_epi_len = 100000
+        max_ep = 3000
+        max_epi_len = 10000
         rec_len = 200
 
-        rec_int = 1
-        test_rend_int = 1
+        # rec_int = 5
+        # test_rend_int = 5
+        rec_int = 1000
+        test_rend_int = 1000
 
         test_rend = False
         rec_stop = 0
         record = False
-        save_int = 1
         back_up_int = 32
+        save_int = 5
         eps_upd_int = 200
-        gamma = 0.99
+        gamma = 1
         eps = 0.5
-        tick = 0
+        nq_upd = 0
         ars = []
-        env = gym.make(self.env_name)
-        # env = gym.wrappers.Monitor(env, './recordings/', force=True)
+        env = gym.make(self.env_name).env
+        env = gym.wrappers.Monitor(env, './recordings/', force=True).env
 
         for ep in xrange(max_ep):
             nstate = env.reset()
 
             # if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
             #     record = True
-            #     record_stop = tick+rec_len
+            #     record_stop = nq_upd+rec_len
 
             if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
                 record = False
-                record_stop = tick+rec_len
+                record_stop = nq_upd+rec_len
 
             # if ep % test_rend_int == 0: test_rend = True
             # else: test_rend = False
@@ -199,35 +200,34 @@ class DQN_Agent():
             else: test_rend = False
 
             for _ in xrange(max_epi_len):
-                if tick == record_stop: record = False
+                if nq_upd == record_stop: record = False
                 if render or record: env.render()
 
                 nstate, rew, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
                 if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, rew, term, info))
                 self.rep_mem.append((nstate, rew, term, info))
-                tick += 1
                 if term:
-                    if verb > 1: print('DQN_Agent::train::term_state(%s)' % nstate)
+                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
                     nstate = env.reset()
 
-                if tick % back_up_int == 0:
-                    state_batch, q_batch = [], []
-                    for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
-                        state_batch.append(lstate)
-                        q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lstate)))
+                state_batch, q_batch = [], []
+                for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
+                    state_batch.append(lstate)
+                    q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lstate)))
 
-                    loss = self.q_net.update_net(state_batch, q_batch)
-                    if tick % eps_upd_int == 0:
-                        eps = max(self.meps, eps-self.deps)
-                        if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
+                loss = self.q_net.update_net(state_batch, q_batch)
+                nq_upd += 1
+                if nq_upd % eps_upd_int == 0:
+                    eps = max(self.meps, eps-self.deps)
+                    if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
             if ep % save_int == 0:
                 self.q_net.save_model_weights(ep)
                 if verb > 0: print('DQN_Agent::train::save_model_weights(%s)' % ep)
-            if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),tick(%s)' % (eps, loss, tick))
+            if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
 
             ars.append(self.test(render=test_rend, verb=1))
-            if ars[-1] <= 200:
+            if ars[-1] <= -110:
                 ds = [ars[i+1]-ars[i] for i in xrange(len(ars)-1)]
                 if len(ds) > 0 and all(d != 0 and abs(d) < 30 for d in ds):
                     self.q_net.lrate -= self.q_net.dlrate
@@ -259,7 +259,7 @@ class DQN_Agent():
         max_epi_len = 200
         eps = 0.5
         avg_rew = 0
-        env = gym.make(self.env_name)
+        env = gym.make(self.env_name).env
 
         for _ in xrange(max_ep):
             nstate = env.reset()
@@ -285,17 +285,18 @@ class DQN_Agent():
         # Initialize your replay memory with a burn_in number of episodes / transitions.
         if verb > 0: print('DQN_Agent::burn_in_memory::start')
 
-        env = gym.make(self.env_name)
+        env = gym.make(self.env_name).env
         nstate = env.reset()
 
         for _ in xrange(self.rep_mem.burn_in):
             if render: env.render()
+
             nstate, reward, term, info = env.step(self.random_policy())
             if verb > 1: print('DQN_Agent::burn_in_memory::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
             self.rep_mem.append((nstate, reward, term, info))
             if term:
                 env.reset()
-                if verb > 1: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
+                if verb > 0: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
 
         if render: env.render(close=True)
         env.close()
@@ -331,7 +332,7 @@ def main(args):
     env_name = args.env
 
     # You want to create an instance of the DQN_Agent class here, and then train / test it.
-    dqn_agent = DQN_Agent('CartPole-v0')
+    dqn_agent = DQN_Agent('MountainCar-v0')
     dqn_agent.train(verb=1)
 
 if __name__ == '__main__':

@@ -38,9 +38,10 @@ class QNetwork():
 
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
-        with tf.variable_scope("layer1"): layer1 = tf.layers.dense(state_ph, self.nact)
-
-        return state_ph, layer1, layer1
+        with tf.variable_scope("layer1"): hidden = tf.layers.dense(state_ph, 128, activation=tf.nn.relu)
+        with tf.variable_scope("layer2"): hidden = tf.layers.dense(hidden, 128, activation=tf.nn.relu)
+        with tf.variable_scope("layer3"): output = tf.layers.dense(hidden, self.nact)
+        return state_ph, output, output
 
     def create_optimizer(self, output):
         label_ph = tf.placeholder(tf.float32, shape=[None])
@@ -131,7 +132,7 @@ class DQN_Agent():
         # Here is also a good place to set environmental parameters,
         # as well as training parameters - number of episodes / iterations, etc.
 
-        self.deps = 9e-4
+        self.deps = 18e-4
         self.meps = 0.05
         self.q_net = QNetwork(env_name)
         self.rep_mem = Replay_Memory(burn_in=5000)
@@ -172,11 +173,12 @@ class DQN_Agent():
         test_rend = False
         rec_stop = 0
         record = False
+        back_up_int = 32
         save_int = 5
         eps_upd_int = 200
         gamma = 1
         eps = 0.5
-        nq_upd = 0
+        tick = 0
         ars = []
         env = gym.make(self.env_name).env
         env = gym.wrappers.Monitor(env, './recordings/', force=True).env
@@ -186,11 +188,11 @@ class DQN_Agent():
 
             # if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
             #     record = True
-            #     record_stop = nq_upd+rec_len
+            #     record_stop = tick+rec_len
 
             if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
                 record = False
-                record_stop = nq_upd+rec_len
+                record_stop = tick+rec_len
 
             # if ep % test_rend_int == 0: test_rend = True
             # else: test_rend = False
@@ -199,31 +201,32 @@ class DQN_Agent():
             else: test_rend = False
 
             for _ in xrange(max_epi_len):
-                if nq_upd == record_stop: record = False
+                if tick == record_stop: record = False
                 if render or record: env.render()
 
                 nstate, rew, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
                 if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, rew, term, info))
                 self.rep_mem.append((nstate, rew, term, info))
+                tick += 1
                 if term:
                     if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
                     nstate = env.reset()
 
-                state_batch, q_batch = [], []
-                for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
-                    state_batch.append(lstate)
-                    q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lstate)))
+                if tick % back_up_int == 0:
+                    state_batch, q_batch = [], []
+                    for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
+                        state_batch.append(lstate)
+                        q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lstate)))
 
-                loss = self.q_net.update_net(state_batch, q_batch)
-                nq_upd += 1
-                if nq_upd % eps_upd_int == 0:
-                    eps = max(self.meps, eps-self.deps)
-                    if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
+                    loss = self.q_net.update_net(state_batch, q_batch)
+                    if tick % eps_upd_int == 0:
+                        eps = max(self.meps, eps-self.deps)
+                        if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
             if ep % save_int == 0:
                 self.q_net.save_model_weights(ep)
                 if verb > 0: print('DQN_Agent::train::save_model_weights(%s)' % ep)
-            if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
+            if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),tick(%s)' % (eps, loss, tick))
 
             ars.append(self.test(render=test_rend, verb=1))
             if ars[-1] <= -110:
