@@ -1,8 +1,9 @@
 #!/usr/bin/env python
+
+# import matplotlib.pyplot as plt
 import keras, tensorflow as tf
 import numpy             as np
 import collections       as col
-import matplotlib.pyplot as plt
 
 import gym, sys, copy, argparse
 import os, time
@@ -42,7 +43,7 @@ class QNetwork():
         return state_ph, layer1, layer1
 
     def create_optimizer(self, output):
-        label_ph = tf.placeholder(tf.int32, shape=[None])
+        label_ph = tf.placeholder(tf.float32, shape=[None])
         with tf.variable_scope("loss"):
             loss = tf.reduce_mean(tf.nn.l2_loss(output))
             tf.summary.scalar('loss', loss)
@@ -162,8 +163,8 @@ class DQN_Agent():
         max_ep = 3000
         max_epi_len = 10000
         rec_len = 200
-        rec_int = 5
-        test_rend_int = 5
+        rec_int = 1000
+        test_rend_int = 1000
         test_rend = False
         rec_stop = 0
         record = False
@@ -179,10 +180,10 @@ class DQN_Agent():
         for ep in xrange(max_ep):
             nstate = env.reset()
             if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
-                record = True
+                record = False
                 record_stop = nq_upd+rec_len
 
-            if ep % test_rend_int == 0: test_rend = True
+            if ep % test_rend_int == 0: test_rend = False
             else: test_rend = False
 
             for _ in xrange(max_epi_len):
@@ -222,11 +223,11 @@ class DQN_Agent():
 
         env.render(close=True)
         env.close()
-        plt.plot(range(len(ars)), ars)
-        plt.xlabel('epochs')
-        plt.ylabel('loss (l2 norm)')
-        plt.title('MountainCar-v0::test::avg loss')
-        plt.savefig('./recordings/MountainCar-v0_test_avg loss.png')
+        # plt.plot(range(len(ars)), ars)
+        # plt.xlabel('epochs')
+        # plt.ylabel('loss (l2 norm)')
+        # plt.title('MountainCar-v0::test::avg loss')
+        # plt.savefig('./recordings/MountainCar-v0_test_avg loss.png')
 
         if verb > 0: print('DQN_Agent::train::return')
 
@@ -313,7 +314,7 @@ def main(args):
     env_name = args.env
 
     # You want to create an instance of the DQN_Agent class here, and then train / test it.
-    dqn_agent = DQN_Agent('MountainCar-v0')
+    dqn_agent = DQN_Agent(env_name)
     dqn_agent.train(verb=1)
 
 if __name__ == '__main__':
