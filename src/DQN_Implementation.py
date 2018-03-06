@@ -24,7 +24,7 @@ class QNetwork():
         self.dstate = len(env.reset())
         self.nact = env.action_space.n
         env.close()
-        self.lrate = 1e-3
+        self.lrate = 1e-4
         self.dlrate = 1e-4
         self.opt_cnt = 0
         self.input, self.model, self.output = self.create_model()
@@ -163,8 +163,12 @@ class DQN_Agent():
         max_ep = 3000
         max_epi_len = 10000
         rec_len = 200
+
+        # rec_int = 5
+        # test_rend_int = 5
         rec_int = 1000
         test_rend_int = 1000
+
         test_rend = False
         rec_stop = 0
         record = False
@@ -179,9 +183,17 @@ class DQN_Agent():
 
         for ep in xrange(max_ep):
             nstate = env.reset()
+
+            # if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
+            #     record = True
+            #     record_stop = nq_upd+rec_len
+
             if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
                 record = False
                 record_stop = nq_upd+rec_len
+
+            # if ep % test_rend_int == 0: test_rend = True
+            # else: test_rend = False
 
             if ep % test_rend_int == 0: test_rend = False
             else: test_rend = False
@@ -223,6 +235,10 @@ class DQN_Agent():
 
         env.render(close=True)
         env.close()
+
+        with open(os.path.join('./recordings/', 'ars.txt'), 'wb') as f:
+            np.save(f, ars)
+
         # plt.plot(range(len(ars)), ars)
         # plt.xlabel('epochs')
         # plt.ylabel('loss (l2 norm)')
