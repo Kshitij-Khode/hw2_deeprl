@@ -28,7 +28,7 @@ cd $SCRATCH
 
 # Running the script PYTHON_SCRIPT inside the singularity: This is of the form:
 # singularity exec <PATH_TO_IMAGE>/tf-gpu.img <PATH_TO_SCRIPT>/<SCRIPT_NAME>.py <ARGUMENTS>
-singularity exec singularity/tf-gpu.img singularity/hw2_deeprl/src/DQN_Implementation_CartPole-v0.py
+singularity exec singularity/tf-gpu.img singularity/hw2_deeprl/src/cartpole/DQN_Implementation_CartPole-v0.py
 
 # I have used the flag #!/usr/bin/env python at the starting of my python scripts,
 # otherwise you would run python scripts/PYTHON_SCRIPT.py above.
