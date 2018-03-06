@@ -1,5 +1,11 @@
 #!/usr/bin/env python
-import keras, tensorflow as tf, numpy as np, gym, sys, copy, argparse, os, time
+import keras, tensorflow as tf
+import numpy             as np
+import collections       as col
+import matplotlib.pyplot as plt
+
+import gym, sys, copy, argparse
+import os, time
 
 class QNetwork():
 
@@ -16,7 +22,8 @@ class QNetwork():
         self.dstate = len(env.reset())
         self.nact = env.action_space.n
         env.close()
-        self.lrate = 1e-3;
+        self.lrate = 1e-3
+        self.dlrate = 1e-4
         self.opt_cnt = 0
         self.input, self.model, self.output = self.create_model()
         self.train, self.loss, self.labels = self.create_optimizer(self.output)
@@ -153,38 +160,59 @@ class DQN_Agent():
         max_ep = 3000
         max_epi_len = 10000
         eps_upd_int = 200
+        rec_int = 1000
         gamma = 1
         eps = 0.5
         nq_upd = 0
+        render_ep = render
+        ars = []
         env = gym.make(self.env_name).env
+        env = gym.wrappers.Monitor(env, './recordings/').env
 
-        for _ in xrange(max_ep):
+        for ep in xrange(max_ep):
             nstate = env.reset()
+            if (ars and ars[-1] >= -120) or (ep % rec_int == 0): render_ep = True
+            else: render_ep = render
 
             for _ in xrange(max_epi_len):
-                if render: env.render()
+                if render_ep: env.render()
 
-                nstate, reward, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
-                if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
-                self.rep_mem.append((nstate, reward, term, info))
+                nstate, rew, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
+                if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, rew, term, info))
+                if term:
+                    nstate = env.reset()
+                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
+                self.rep_mem.append((nstate, rew, term, info))
 
                 state_batch, q_batch = [], []
-                for state, reward, term, info in self.rep_mem.sample_batch():
-                    state_batch.append(state)
-                    q_batch.append(reward if term else reward+gamma*np.max(self.q_net.get_qvals(nstate)))
+                for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
+                    state_batch.append(lstate)
+                    q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(nstate)))
 
                 loss = self.q_net.update_net(state_batch, q_batch)
                 nq_upd += 1
-                if nq_upd % eps_upd_int == 0: eps = max(self.meps, eps-self.deps)
-                if term:
-                    if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
-                    break
+                if nq_upd % eps_upd_int == 0:
+                    eps = max(self.meps, eps-self.deps)
+                    if verb > 1: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
             if verb > 0: print('DQN_Agent::train::eps(%s),loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
 
-            self.test(render=True, verb=1)
+            ars.append(self.test(verb=1))
+            if ars[-1] <= -110:
+                ds = [ars[i+1]-ars[i] for i in xrange(len(ars)-1)]
+                if len(ds) > 0 and all(d != 0 and abs(d) < 30 for d in ds):
+                    self.q_net.lrate -= self.q_net.dlrate
+                    if verb > 0: print('DQN_Agent::train::lrate(%s)' % self.q_net.lrate)
+            else: break
 
+        env.render(close=True)
         env.close()
+        plt.plot(range(len(ars)), ars)
+        plt.xlabel('epochs')
+        plt.ylabel('loss (l2 norm)')
+        plt.title('MountainCar-v0::test::avg loss')
+        plt.savefig('./recordings/MountainCar-v0_test_avg loss.png')
+
         if verb > 0: print('DQN_Agent::train::return')
 
 
@@ -214,6 +242,7 @@ class DQN_Agent():
                     break
 
         avg_rew /= max_ep
+        if render: env.render(close=True)
         env.close()
         if verb > 0: print('DQN_Agent::test::return::avg_rew:%s' % avg_rew)
         return avg_rew
@@ -235,6 +264,7 @@ class DQN_Agent():
                 env.reset()
                 if verb > 0: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
 
+        if render: env.render(close=True)
         env.close()
         if verb > 0: print('DQN_Agent::burn_in_memory::return')
 
