@@ -131,7 +131,7 @@ class DQN_Agent():
         # Here is also a good place to set environmental parameters,
         # as well as training parameters - number of episodes / iterations, etc.
 
-        self.deps = 0.03
+        self.deps = 0.0000045
         self.meps = 0.05
         self.q_net = QNetwork(env_name)
         self.rep_mem = Replay_Memory(burn_in=10000)
@@ -221,11 +221,11 @@ class DQN_Agent():
 
 
                 loss = self.q_net.update_net(state_batch, q_batch)
-                nq_upd += 1
-            # update epsilon
-            if nq_upd % eps_upd_int == 0:
+
                 eps = max(self.meps, eps-self.deps)
-                if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
+                nq_upd += 1
+                if (nq_upd % eps_upd_int == 0):
+                    if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
             # append a new test average and keep trying until the average reward is better than -110
             ars.append(self.test(render=False, verb=1))
