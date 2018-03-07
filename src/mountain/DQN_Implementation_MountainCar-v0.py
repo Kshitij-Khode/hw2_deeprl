@@ -24,7 +24,7 @@ class QNetwork():
         self.dstate = len(env.reset())
         self.nact = env.action_space.n
         env.close()
-        self.lrate = 1e-4
+        self.lrate = 1e-3
         self.dlrate = 1e-4
         self.opt_cnt = 0
         self.input, self.model, self.output = self.create_model()
@@ -38,13 +38,13 @@ class QNetwork():
 
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
-        with tf.variable_scope("layer1"): hidden = tf.layers.dense(state_ph, 128, activation=tf.nn.relu)
+        with tf.variable_scope("layer1"): hidden = tf.layers.dense(state_ph, 64, activation=tf.nn.tanh)
         with tf.variable_scope("layer2"): hidden = tf.layers.dense(hidden, 128, activation=tf.nn.relu)
         with tf.variable_scope("layer3"): output = tf.layers.dense(hidden, self.nact)
         return state_ph, output, output
 
     def create_optimizer(self, output):
-        label_ph = tf.placeholder(tf.float32, shape=[None])
+        label_ph = tf.placeholder(tf.float32, shape=[None, self.nact])
         with tf.variable_scope("loss"):
             loss = tf.reduce_mean(tf.nn.l2_loss(output))
             tf.summary.scalar('loss', loss)
@@ -132,10 +132,10 @@ class DQN_Agent():
         # Here is also a good place to set environmental parameters,
         # as well as training parameters - number of episodes / iterations, etc.
 
-        self.deps = 18e-4
+        self.deps = 0.03
         self.meps = 0.05
         self.q_net = QNetwork(env_name)
-        self.rep_mem = Replay_Memory(burn_in=5000)
+        self.rep_mem = Replay_Memory(burn_in=10000)
         self.env_name = env_name
 
     def epsilon_greedy_policy(self, q_values, eps):
@@ -166,9 +166,9 @@ class DQN_Agent():
         rec_len = 200
 
         # rec_int = 5
-        # test_rend_int = 5
+        test_rend_int = 5
         rec_int = 1000
-        test_rend_int = 1000
+        #test_rend_int = 1000
 
         test_rend = False
         rec_stop = 0
@@ -178,7 +178,7 @@ class DQN_Agent():
         eps_upd_int = 200
         gamma = 1
         eps = 0.5
-        tick = 0
+        nq_upd = 0
         ars = []
         env = gym.make(self.env_name).env
         env = gym.wrappers.Monitor(env, './recordings/', force=True).env
@@ -188,53 +188,60 @@ class DQN_Agent():
 
             # if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
             #     record = True
-            #     record_stop = tick+rec_len
+            #     record_stop = nq_upd+rec_len
 
             if (ars and ars[-1] >= -120) or (ep % rec_int == 0):
                 record = False
-                record_stop = tick+rec_len
+                record_stop = nq_upd+rec_len
 
             # if ep % test_rend_int == 0: test_rend = True
             # else: test_rend = False
 
-            if ep % test_rend_int == 0: test_rend = False
-            else: test_rend = False
+            if ep % test_rend_int == 0: test_rend = True
+            else: test_rend = True
 
             for _ in xrange(max_epi_len):
-                if tick == record_stop: record = False
+                if nq_upd == record_stop: record = False
                 if render or record: env.render()
 
-                nstate, rew, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps))
+                pstate = nstate
+                action = self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps)
+                nstate, rew, term, info = env.step(action)
                 if verb > 1: print('DQN_Agent::train::ntrans::(%s, %s, %s, %s)' % (nstate, rew, term, info))
-                self.rep_mem.append((nstate, rew, term, info))
-                tick += 1
+                self.rep_mem.append((pstate, action, rew, nstate, term))
                 if term:
                     if verb > 0: print('DQN_Agent::train::term_state(%s)' % nstate)
-                    nstate = env.reset()
+                    break
 
-                if tick % back_up_int == 0:
-                    state_batch, q_batch = [], []
-                    for lstate, lrew, lterm, _ in self.rep_mem.sample_batch():
-                        state_batch.append(lstate)
-                        q_batch.append(lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lstate)))
+                state_batch, q_batch = [], []
+                for pstate, action, rew, nstate, term in self.rep_mem.sample_batch():
+                    y_n = self.q_net.get_qvals(pstate)
+                    y_n[action] = rew if term else rew+gamma*np.max(self.q_net.get_qvals(nstate))
+                    q_batch.append(y_n)
+                    state_batch.append(pstate.flatten())
 
-                    loss = self.q_net.update_net(state_batch, q_batch)
-                    if tick % eps_upd_int == 0:
-                        eps = max(self.meps, eps-self.deps)
-                        if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
-            if ep % save_int == 0:
-                self.q_net.save_model_weights(ep)
-                if verb > 0: print('DQN_Agent::train::save_model_weights(%s)' % ep)
-            if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),tick(%s)' % (eps, loss, tick))
+                loss = self.q_net.update_net(state_batch, q_batch)
+                nq_upd += 1
+            # update epsilon
+            if nq_upd % eps_upd_int == 0:
+                eps = max(self.meps, eps-self.deps)
+                if verb > 0: print('DQN_Agent::train::eps_upd(%s)' % eps)
 
-            ars.append(self.test(render=test_rend, verb=1))
+            # append a new test average and keep trying until the average reward is better than -110
+            ars.append(self.test(render=False, verb=1))
             if ars[-1] <= -110:
                 ds = [ars[i+1]-ars[i] for i in xrange(len(ars)-1)]
                 if len(ds) > 0 and all(d != 0 and abs(d) < 30 for d in ds):
                     self.q_net.lrate -= self.q_net.dlrate
                     if verb > 0: print('DQN_Agent::train::lrate(%s)' % self.q_net.lrate)
             else: break
+
+        self.test(render=True, verb=1)
+
+        self.q_net.save_model_weights(ep)
+        if verb > 0: print('DQN_Agent::train::save_model_weights(%s)' % ep)
+        if verb > 0: print('DQN_Agent::train::eps(%s),last_loss(%s),nq_upd(%s)' % (eps, loss, nq_upd))
 
         env.render(close=True)
         env.close()
@@ -259,7 +266,6 @@ class DQN_Agent():
 
         max_ep = 20
         max_epi_len = 10000
-        eps = 0.5
         avg_rew = 0
         env = gym.make(self.env_name)
 
@@ -286,16 +292,18 @@ class DQN_Agent():
     def burn_in_memory(self, render=False, verb=0):
         # Initialize your replay memory with a burn_in number of episodes / transitions.
         if verb > 0: print('DQN_Agent::burn_in_memory::start')
+        print "burn in is %d" % self.rep_mem.burn_in
 
         env = gym.make(self.env_name).env
         nstate = env.reset()
 
         for _ in xrange(self.rep_mem.burn_in):
             if render: env.render()
-
-            nstate, reward, term, info = env.step(self.random_policy())
-            if verb > 1: print('DQN_Agent::burn_in_memory::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
-            self.rep_mem.append((nstate, reward, term, info))
+            pstate = nstate
+            action = self.random_policy()
+            nstate, reward, term, info = env.step(action)
+            if verb > 1: print('DQN_Agent::burn_in_memory::ntrans::(%s, %s, %s, %s)' % (pstate, reward, action, nstate))
+            self.rep_mem.append((pstate, action, reward, nstate, term))
             if term:
                 env.reset()
                 if verb > 0: print('DQN_Agent::burn_in_memory::term_state(%s)' % nstate)
