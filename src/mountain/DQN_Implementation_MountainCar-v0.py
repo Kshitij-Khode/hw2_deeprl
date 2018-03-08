@@ -39,7 +39,7 @@ class QNetwork():
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
         with tf.variable_scope("layer1"): hidden = tf.layers.dense(state_ph, 3, activation=tf.nn.tanh)
-        with tf.variable_scope("layer2"): output = tf.layers.dense(hidden, self.nact)
+        with tf.variable_scope("layer2"): output = tf.layers.dense(hidden, self.nact, activation=tf.nn.tanh)
         return state_ph, output
 
     def create_optimizer(self, output):
