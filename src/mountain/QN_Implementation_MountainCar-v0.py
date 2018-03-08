@@ -27,7 +27,7 @@ class QNetwork():
         self.lrate = 1e-3
         self.dlrate = 1e-4
         self.opt_cnt = 0
-        self.input, self.model, self.output = self.create_model()
+        self.input, self.output = self.create_model()
         self.train, self.loss, self.labels = self.create_optimizer(self.output)
         self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
         keras.backend.tensorflow_backend.set_session(self.sess)
@@ -38,14 +38,14 @@ class QNetwork():
 
     def create_model(self):
         state_ph = tf.placeholder(tf.float32, shape=[None, self.dstate])
-        with tf.variable_scope("layer1"): layer1 = tf.layers.dense(state_ph, self.nact)
+        with tf.variable_scope("layer1"): layer = tf.layers.dense(state_ph, self.nact)
 
-        return state_ph, layer1, layer1
+        return state_ph, layer
 
     def create_optimizer(self, output):
         label_ph = tf.placeholder(tf.float32, shape=[None, self.nact])
         with tf.variable_scope("loss"):
-            loss = tf.reduce_mean(tf.nn.l2_loss(output))
+            loss = tf.reduce_sum(tf.square(label_ph - output))
             tf.summary.scalar('loss', loss)
 
         with tf.variable_scope("training"):
@@ -67,7 +67,7 @@ class QNetwork():
         pass
 
     def get_qvals(self, state):
-        return self.sess.run(self.model, feed_dict={self.input: [state.flatten()]})[0]
+        return self.sess.run(self.output, feed_dict={self.input: [state.flatten()]})[0]
 
     def update_net(self, states, q_lbls, verb=0):
         _, loss, summ = self.sess.run([self.train, self.loss, self.m_summ], feed_dict={
@@ -217,7 +217,7 @@ class DQN_Agent():
                     y_n = self.q_net.get_qvals(pstate)
                     y_n[action] = rew if term else rew+gamma*np.max(self.q_net.get_qvals(nstate))
                     q_batch.append(y_n)
-                    state_batch.append(pstate.flatten())
+                    state_batch.append(pstate)
 
 
                 loss = self.q_net.update_net(state_batch, q_batch)
@@ -274,7 +274,7 @@ class DQN_Agent():
             for _ in xrange(max_epi_len):
                 if render: env.render()
 
-                nstate, reward, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), self.meps))
+                nstate, reward, term, info = env.step(self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), 0.0))
                 if verb > 1: print('DQN_Agent::test::ntrans::(%s, %s, %s, %s)' % (nstate, reward, term, info))
                 avg_rew += reward
                 if term:
