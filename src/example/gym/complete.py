@@ -6,7 +6,7 @@ def main():
 	env = gym.make('MountainCar-v0')
 
 	# Record the environment
-	env = gym.wrappers.Monitor(env, '.', force=True)
+	# env = gym.wrappers.Monitor(env, '.', force=True)
 
 	for episode in range(100):
 		done = False
@@ -17,7 +17,7 @@ def main():
 
 			action = env.action_space.sample()
 			obs, reward, done, info = env.step(action)
-
+			print(env.min_position, env.max_position, env.max_speed)
 
 
 if __name__ == '__main__':

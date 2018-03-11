@@ -76,6 +76,8 @@ def run_recorder(opts):
                 done = True
                 break
 
+            print(action)
+
             obs, reward, done, info = env.step(action)
             print((obs, reward, done, info))
 
