@@ -154,8 +154,8 @@ class DQN_Agent():
         gamma = 0.99
 
         max_brn_at = 20
-        max_ep_len = 100
-        max_ep     = 10000
+        max_ep_len = 10000
+        max_ep     = 100
 
         save_int = 33
 

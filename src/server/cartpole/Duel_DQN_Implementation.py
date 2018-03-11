@@ -160,13 +160,13 @@ class DQN_Agent():
         gamma = 0.99
 
         max_brn_at = 20
-        max_ep_len = 100
-        max_ep     = 10000
+        max_ep_len = 10000
+        max_ep     = 100
 
         save_int = 33
 
         rew_rec_thresh = 180
-        rew_brk_thresh = 200
+        rew_brk_thresh = 220
         rew_base       = 100
         lr_plat_r      = 20
         avg_rew        = []
