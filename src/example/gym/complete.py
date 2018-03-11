@@ -3,7 +3,8 @@ import gym
 
 def main():
 	# Make the environment
-	env = gym.make('MountainCar-v0')
+	# env = gym.make('MountainCar-v0')
+	env = gym.make('CartPole-v0')
 
 	# Record the environment
 	# env = gym.wrappers.Monitor(env, '.', force=True)
@@ -17,7 +18,7 @@ def main():
 
 			action = env.action_space.sample()
 			obs, reward, done, info = env.step(action)
-			print(env.min_position, env.max_position, env.max_speed)
+			print(obs, info)
 
 
 if __name__ == '__main__':

@@ -20,17 +20,18 @@ class QNetwork():
     def __init__(self, env_name):
         # Define your network architecture here. It is also a good idea to define any training operations
         # and optimizers here, initialize your variables, or alternately compile your model here.
-        self.env_name      = env_name
-        self.state_dim     = 2
-        self.num_act       = 3
-        self.min_position  = -1.2
-        self.max_position  = 0.6-0.1
-        self.max_speed     = 0.07
-        self.goal_position = 0.5
-        self.pos_int       = 5
-        self.vel_int       = 2
-        self.lrate    = 1e-4
-        self.dlrate   = 1e-5
+        self.env_name  = env_name
+        self.state_dim = 4
+        self.num_act   = 2
+        self.min_pos   = -0.3
+        self.max_pos   = 0.3
+        self.min_theta = -0.1
+        self.max_theta = 0.1
+        self.pos_int   = 4
+        self.theta_int = 2
+
+        self.lrate  = 1e-4
+        self.dlrate = 1e-5
 
         self.model = Sequential()
         self.model.add(Dense(30, input_shape=(self.state_dim,), init='lecun_uniform'))
@@ -58,7 +59,7 @@ class QNetwork():
         pass
 
     def get_qvals(self, state):
-        return self.model.predict(np.array([[state[0], state[1]]]))[0]
+        return self.model.predict(np.array([[state[0], state[1], state[2], state[3]]]))[0]
 
     def update_net(self, states, q_lbls):
         loss = self.model.train_on_batch(np.array(states), np.array(q_lbls))
@@ -66,9 +67,9 @@ class QNetwork():
 
     def print_qmap(self):
         print('--- Q Map Start ---')
-        for p in np.linspace(self.min_position, self.max_position, self.pos_int):
-            for v in np.linspace(0, self.max_speed, self.vel_int):
-                print('Pos: %.5s, Vel: %.5s, Qs: %s' % (p, v, self.get_qvals([p,v])))
+        for p in np.linspace(self.min_pos, self.max_pos, self.pos_int):
+            for t in np.linspace(self.min_theta, self.max_theta, self.theta_int):
+                    print('Pos: %.5s, Theta: %.5s, Qs: %s' % (p, t, self.get_qvals([p,0,t,0])))
         print('--- Q Map End ---')
 
 
@@ -92,7 +93,7 @@ class Replay_Memory():
     def sample_batch(self, batch_size=32):
         # This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples.
         # You will feed this to your model to train.
-        if np.random.uniform() < 0.5:
+        if np.random.uniform() < 0.1:
             ret_val = [self.memory[i] for i in np.random.choice(len(self.memory), batch_size-1)] + \
                       [self.term_memory[i] for i in np.random.choice(len(self.term_memory), 1)]
             random.shuffle(ret_val)
@@ -128,8 +129,8 @@ class DQN_Agent():
         self.env_name = env_name
         self.dec_eps  = 0.0000045
         self.min_eps  = 0.05
-        self.q_net1   = QNetwork(env_name)
-        self.q_net2   = QNetwork(env_name)
+        self.q_net1    = QNetwork(env_name)
+        self.q_net2    = QNetwork(env_name)
         self.rep_mem  = Replay_Memory(burn_in=10000)
 
     def random_policy(self):
@@ -156,19 +157,18 @@ class DQN_Agent():
 
         tick  = 0
         eps   = 0.5
-        gamma = 1
+        gamma = 0.99
 
         max_brn_at = 20
-        max_ep_len = 200
-        max_ep     = 3000
+        max_ep_len = 100
+        max_ep     = 10000
 
-        test_int = 10000
-        save_int = 1000
+        save_int = 33
 
-        rew_rec_thresh = -160
-        rew_brk_thresh = -140
-        rew_base       = -200
-        lr_plat_r      = 50
+        rew_rec_thresh = 180
+        rew_brk_thresh = 200
+        rew_base       = 100
+        lr_plat_r      = 20
         avg_rew        = []
         env            = gym.make(self.env_name).env
 
@@ -182,6 +182,7 @@ class DQN_Agent():
             nstate = env.reset()
 
             self.q_net1.print_qmap()
+            self.q_net2.print_qmap()
             print('Train::Episode:(%s), LRate:%s, Eps:%s, Last Loss:%s' % (ep, self.q_net1.lrate, eps, loss if 'loss' in locals() else None))
             print('Train::Episode:(%s), LRate:%s, Eps:%s, Last Loss:%s' % (ep, self.q_net2.lrate, eps, loss if 'loss' in locals() else None))
 
@@ -191,7 +192,7 @@ class DQN_Agent():
                 nstate, rew, term, info = env.step(action)
                 self.rep_mem.append((pstate, action, rew, nstate, term))
 
-                qchoice = np.random.uniform()
+                qchoice = random = np.random.uniform()
                 state_batch, q_batch = [], []
                 for lpst, lact, lrew, lnst, lterm in self.rep_mem.sample_batch():
                     if qchoice < 0.5:
@@ -212,8 +213,8 @@ class DQN_Agent():
                 eps   = max(self.min_eps, eps-self.dec_eps)
 
                 if term:
-                    print('Train::Term_state(%s)' % nstate)
-                    break
+                    # print('Train::Term_state(%s)' % nstate)
+                    nstate = env.reset()
 
             avg_rew.append(self.test())
 
@@ -259,7 +260,7 @@ class DQN_Agent():
             nstate = env.reset()
 
             for _ in xrange(max_ep_len):
-                action = self.epsilon_greedy_policy(self.q_net1.get_qvals(nstate)+self.q_net2.get_qvals(nstate), self.min_eps)
+                action = self.epsilon_greedy_policy(self.q_net1.get_qvals(nstate), self.min_eps)
                 nstate, rew, term, _ = env.step(action)
                 avg_rew += rew
 
@@ -288,7 +289,7 @@ class DQN_Agent():
             self.rep_mem.append((pstate, action, rew, nstate, term))
             if term:
                 sterm = True
-                print('Burn_in_memory::Term_State(%s, %s, %s, %s, %s)' % (pstate, action, rew, nstate, term))
+                # print('Burn_in_memory::Term_State(%s, %s, %s, %s, %s)' % (pstate, action, rew, nstate, term))
                 nstate = env.reset()
 
         env.close()
@@ -308,7 +309,7 @@ def parse_arguments():
 def main(args):
 
     args      = parse_arguments()
-    dqn_agent = DQN_Agent('MountainCar-v0')
+    dqn_agent = DQN_Agent('CartPole-v0')
 
     dqn_agent.train()
 

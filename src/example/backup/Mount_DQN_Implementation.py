@@ -3,12 +3,11 @@ from keras.models       import Sequential
 from keras.layers.core  import Dense, Dropout, Activation
 from keras              import optimizers
 from keras.layers.advanced_activations import LeakyReLU
-from keras.layers.normalization        import BatchNormalization
 
 import tensorflow as tf
 import numpy      as np
 
-import gym, sys, copy, argparse, collections, time, random, os
+import gym, sys, copy, argparse, collections, time
 
 class QNetwork():
 
@@ -24,11 +23,12 @@ class QNetwork():
         self.state_dim     = 2
         self.num_act       = 3
         self.min_position  = -1.2
-        self.max_position  = 0.6-0.1
+        self.max_position  = 0.6
         self.max_speed     = 0.07
         self.goal_position = 0.5
-        self.pos_int       = 5
-        self.vel_int       = 2
+        self.pos_int       = 0.5
+        self.vel_int       = 0.04
+
         self.lrate    = 1e-4
         self.dlrate   = 1e-5
 
@@ -39,7 +39,7 @@ class QNetwork():
         self.model.add(LeakyReLU(alpha=0.01))
         self.model.add(Dense(30, init='lecun_uniform'))
         self.model.add(LeakyReLU(alpha=0.01))
-        self.model.add(Dense(self.num_act))
+        self.model.add(Dense(self.num_act, init='lecun_uniform'))
         self.model.add(Activation("linear"))
 
         self.model.compile(loss="mse", optimizer=optimizers.Adam(lr=self.lrate))
@@ -47,7 +47,7 @@ class QNetwork():
 
     def save_model_weights(self, suffix):
         # Helper function to save your model / weights.
-        self.model.save_weights('./model/%s_weights.ckpt' % suffix, overwrite=True)
+        self.model.save_weights('./model/weights.ckpt', overwrite=True)
 
     def load_model(self, model_file):
         # Helper function to load an existing model.
@@ -66,8 +66,8 @@ class QNetwork():
 
     def print_qmap(self):
         print('--- Q Map Start ---')
-        for p in np.linspace(self.min_position, self.max_position, self.pos_int):
-            for v in np.linspace(0, self.max_speed, self.vel_int):
+        for p in np.arange(self.min_position, self.max_position+self.pos_int, self.pos_int):
+            for v in np.arange(0, self.max_speed+self.vel_int, self.vel_int):
                 print('Pos: %.5s, Vel: %.5s, Qs: %s' % (p, v, self.get_qvals([p,v])))
         print('--- Q Map End ---')
 
@@ -83,26 +83,17 @@ class Replay_Memory():
         # randomly initialized agent. Memory size is the maximum size after which old elements in the memory are replaced.
         # A simple (if not the most efficient) was to implement the memory is as a list of transitions.
 
-        self.term_mem_ln = 10
         self.memory_size = memory_size
         self.burn_in     = burn_in
         self.memory      = collections.deque(maxlen=self.memory_size)
-        self.term_memory = collections.deque(maxlen=self.term_mem_ln)
 
     def sample_batch(self, batch_size=32):
         # This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples.
         # You will feed this to your model to train.
-        if np.random.uniform() < 0.5:
-            ret_val = [self.memory[i] for i in np.random.choice(len(self.memory), batch_size-1)] + \
-                      [self.term_memory[i] for i in np.random.choice(len(self.term_memory), 1)]
-            random.shuffle(ret_val)
-        else: ret_val = [self.memory[i] for i in np.random.choice(len(self.memory), batch_size)]
-        return ret_val
+        return [self.memory[i] for i in np.random.choice(len(self.memory), batch_size)]
 
     def append(self, transition):
         # Appends transition to the memory.
-        if transition[4] == True:
-            self.term_memory.append(transition)
         self.memory.append(transition)
 
     def clear(self):
@@ -128,16 +119,15 @@ class DQN_Agent():
         self.env_name = env_name
         self.dec_eps  = 0.0000045
         self.min_eps  = 0.05
-        self.q_net1   = QNetwork(env_name)
-        self.q_net2   = QNetwork(env_name)
+        self.q_net    = QNetwork(env_name)
         self.rep_mem  = Replay_Memory(burn_in=10000)
 
     def random_policy(self):
-        return np.random.random_integers(0, self.q_net1.num_act-1)
+        return np.random.random_integers(0, self.q_net.num_act-1)
 
     def epsilon_greedy_policy(self, q_values, eps):
         # Creating epsilon greedy probabilities to sample from.
-        if np.random.uniform() < eps: return np.random.random_integers(0, self.q_net1.num_act-1)
+        if np.random.uniform() < eps: return np.random.random_integers(0, self.q_net.num_act-1)
         else:                         return self.greedy_policy(q_values)
 
     def greedy_policy(self, q_values):
@@ -165,15 +155,13 @@ class DQN_Agent():
         test_int = 10000
         save_int = 1000
 
-        rew_rec_thresh = -160
-        rew_brk_thresh = -140
-        rew_base       = -200
-        lr_plat_r      = 50
+        rew_rec_thresh = -120
+        rew_brk_thresh = -110
         avg_rew        = []
         env            = gym.make(self.env_name).env
 
         for _ in xrange(max_brn_at):
-            if not self.burn_in_memory():
+            if not self.burn_in_memory(eps):
                 print('Train::Bad_Burn_In::No_Term_Reached')
                 self.rep_mem.clear()
             else: break
@@ -181,32 +169,26 @@ class DQN_Agent():
         for ep in xrange(max_ep):
             nstate = env.reset()
 
-            self.q_net1.print_qmap()
-            print('Train::Episode:(%s), LRate:%s, Eps:%s, Last Loss:%s' % (ep, self.q_net1.lrate, eps, loss if 'loss' in locals() else None))
-            print('Train::Episode:(%s), LRate:%s, Eps:%s, Last Loss:%s' % (ep, self.q_net2.lrate, eps, loss if 'loss' in locals() else None))
+            self.q_net.print_qmap()
+            print('Train::Episode:(%s), LRate:%s, Eps:%s, Last Loss:%s' % (ep, self.q_net.lrate, eps, loss if 'loss' in locals() else None))
+
+            if (avg_rew and avg_rew[-1] >= rew_rec_thresh) or (ep % save_int == 0):
+                self.q_net.save_model_weights(ep)
 
             for _ in xrange(max_ep_len):
                 pstate = nstate
-                action = self.epsilon_greedy_policy(self.q_net1.get_qvals(nstate)+self.q_net2.get_qvals(nstate), eps)
+                action = self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), eps)
                 nstate, rew, term, info = env.step(action)
                 self.rep_mem.append((pstate, action, rew, nstate, term))
 
-                qchoice = np.random.uniform()
                 state_batch, q_batch = [], []
                 for lpst, lact, lrew, lnst, lterm in self.rep_mem.sample_batch():
-                    if qchoice < 0.5:
-                        y_n       = self.q_net1.get_qvals(lpst)
-                        y_n[lact] = lrew if lterm else lrew+gamma*np.max(self.q_net1.get_qvals(lnst))
-                    else:
-                        y_n       = self.q_net2.get_qvals(lpst)
-                        y_n[lact] = lrew if lterm else lrew+gamma*np.max(self.q_net2.get_qvals(lnst))
+                    y_n       = self.q_net.get_qvals(lpst)
+                    y_n[lact] = lrew if lterm else lrew+gamma*np.max(self.q_net.get_qvals(lnst))
                     q_batch.append(y_n)
                     state_batch.append(lpst)
 
-                if qchoice < 0.5:
-                    loss = self.q_net1.update_net(state_batch, q_batch)
-                else:
-                    loss = self.q_net2.update_net(state_batch, q_batch)
+                loss = self.q_net.update_net(state_batch, q_batch)
 
                 tick += 1
                 eps   = max(self.min_eps, eps-self.dec_eps)
@@ -216,24 +198,14 @@ class DQN_Agent():
                     break
 
             avg_rew.append(self.test())
+            if avg_rew[-1] >= -110: break
+            elif avg_rew > -200:
+                diff_rew = [avg_rew[i+1]-avg_rew[i] for i in xrange(len(avg_rew)-1)]
+                if len(diff_rew) > 0 and all(d != 0 and abs(d) < 30 for d in diff_rew):
+                    self.q_net.lrate -= self.q_net.dlrate
+                    print('Train::LRate(%s)' % self.q_net.lrate)
 
-            if (avg_rew and avg_rew[-1] >= rew_rec_thresh) or (ep % save_int == 0):
-                self.q_net1.save_model_weights('%s_%s' % (ep, 1))
-                self.q_net2.save_model_weights('%s_%s' % (ep, 2))
-
-            if avg_rew[-1] >= rew_brk_thresh: break
-
-            if avg_rew[-1] > rew_base:
-                last_rew = avg_rew[-3:]
-                diff_rew = [last_rew[i+1]-last_rew[i] for i in xrange(len(last_rew)-1)]
-                if len(diff_rew) > 0 and all(d != 0 and abs(d) < lr_plat_r for d in diff_rew):
-                    self.q_net1.lrate = max(self.q_net1.dlrate, self.q_net1.lrate-self.q_net1.dlrate)
-                    self.q_net2.lrate = max(self.q_net2.dlrate, self.q_net2.lrate-self.q_net2.dlrate)
-                    print('Train::LRate(%s)' % self.q_net1.lrate)
-                    print('Train::LRate(%s)' % self.q_net2.lrate)
-
-        self.q_net1.save_model_weights(ep)
-        self.q_net2.save_model_weights(ep)
+        self.q_net.save_model_weights(ep)
         with open(os.path.join('./model/', 'avg_rew.dat'), 'wb') as f:
             np.save(f, avg_rew)
 
@@ -259,7 +231,7 @@ class DQN_Agent():
             nstate = env.reset()
 
             for _ in xrange(max_ep_len):
-                action = self.epsilon_greedy_policy(self.q_net1.get_qvals(nstate)+self.q_net2.get_qvals(nstate), self.min_eps)
+                action = self.epsilon_greedy_policy(self.q_net.get_qvals(nstate), self.min_eps)
                 nstate, rew, term, _ = env.step(action)
                 avg_rew += rew
 
@@ -272,7 +244,7 @@ class DQN_Agent():
         env.close()
         return avg_rew
 
-    def burn_in_memory(self):
+    def burn_in_memory(self, eps):
         # Initialize your replay memory with a burn_in number of transitions.
         print('Burn_in_memory::Start')
 
@@ -288,7 +260,7 @@ class DQN_Agent():
             self.rep_mem.append((pstate, action, rew, nstate, term))
             if term:
                 sterm = True
-                print('Burn_in_memory::Term_State(%s, %s, %s, %s, %s)' % (pstate, action, rew, nstate, term))
+                print('Burn_in_memory::Term_State(%s)' % nstate)
                 nstate = env.reset()
 
         env.close()

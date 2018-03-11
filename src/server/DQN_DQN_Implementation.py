@@ -41,6 +41,7 @@ class QNetwork():
         self.model.add(Dense(30, init='lecun_uniform'))
         self.model.add(LeakyReLU(alpha=0.01))
         self.model.add(Dense(self.num_act))
+        self.model.add(Activation("linear"))
 
         self.model.compile(loss="mse", optimizer=optimizers.Adam(lr=self.lrate))
         self.model.summary()
@@ -92,7 +93,7 @@ class Replay_Memory():
     def sample_batch(self, batch_size=32):
         # This function returns a batch of randomly sampled transitions - i.e. state, action, reward, next state, terminal flag tuples.
         # You will feed this to your model to train.
-        if np.random.uniform() < 0.1:
+        if np.random.uniform() < 0.5:
             ret_val = [self.memory[i] for i in np.random.choice(len(self.memory), batch_size-1)] + \
                       [self.term_memory[i] for i in np.random.choice(len(self.term_memory), 1)]
             random.shuffle(ret_val)
@@ -166,7 +167,7 @@ class DQN_Agent():
 
         rew_rec_thresh = -160
         rew_brk_thresh = -140
-        rew_max        = -200
+        rew_base       = -200
         lr_plat_r      = 50
         avg_rew        = []
         env            = gym.make(self.env_name).env
@@ -211,8 +212,10 @@ class DQN_Agent():
                 self.q_net.save_model_weights(ep)
 
             if avg_rew[-1] >= rew_brk_thresh: break
-            elif avg_rew[-1] > -rew_max:
-                diff_rew = [avg_rew[i+1]-avg_rew[i] for i in xrange(len(avg_rew)-1)]
+
+            if avg_rew[-1] > rew_base:
+                last_rew = avg_rew[-3:]
+                diff_rew = [last_rew[i+1]-last_rew[i] for i in xrange(len(last_rew)-1)]
                 if len(diff_rew) > 0 and all(d != 0 and abs(d) < lr_plat_r for d in diff_rew):
                     self.q_net.lrate = max(self.q_net.dlrate, self.q_net.lrate-self.q_net.dlrate)
                     print('Train::LRate(%s)' % self.q_net.lrate)
